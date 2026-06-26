@@ -1,103 +1,82 @@
+// CONFIGURACIÓN: Cambiá esto por la IP local de tu PC ejecutando el backend (Ej: 'http://111.111.1.11:8000')
+const API_BASE_URL = 'http://127.0.0.1:8000'; 
+
 const video = document.getElementById('webcam');
-const scannerLaser = document.getElementById('scanner-laser');
 const productCard = document.getElementById('product-card');
+const scannerBox = document.getElementById('scanner-box');
 
-// Elementos de la tarjeta de producto
-const prodNombre = document.getElementById('prod-nombre');
-const prodPrecio = document.getElementById('prod-precio');
-const prodStock = document.getElementById('prod-stock');
+let escaneoBloqueado = false;
 
-let scanningActive = true;
-
-// 1. Activar la cámara del celular (Usando la cámara trasera por defecto)
-async function initCamera() {
+// 1. Encender la cámara del Celular
+async function inicializarCamara() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: 'environment', // Fuerza la cámara trasera
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            },
+            video: { facingMode: { exact: "environment" } }, // Intenta usar la cámara trasera obligatoriamente
             audio: false
         });
         video.srcObject = stream;
     } catch (err) {
-        console.error("Error al acceder a la cámara: ", err);
-        alert("Por favor, permite el acceso a la cámara para usar el escáner.");
+        console.warn("No se detectó cámara trasera, usando cámara disponible/frontal.");
+        try {
+            const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            video.srcObject = fallbackStream;
+        } catch (e) {
+            alert("Error crítico: No se pudo acceder a ninguna cámara.");
+        }
     }
 }
 
-// 2. Simulación y lectura del sistema de muescas/líneas rectangulares
-// En producción, aquí se procesarían los fotogramas del canvas leyendo transiciones de blanco/negro
-function iniciarBucleEscaneo() {
-    setInterval(() => {
-        if (!scanningActive) return;
+// 2. Enviar código detectado a la API backend
+async function procesarCodigoDetectado(codigo) {
+    if (escaneoBloqueado) return;
+    escaneoBloqueado = true;
 
-        // Aquí el algoritmo detectaría tu patrón rectangular. 
-        // Para pruebas en el navegador, si presionas la tecla "S" o tocas la pantalla simulamos una lectura exitosa de prueba
-    }, 1000);
-}
-
-// Función para enviar los 11 dígitos al backend de Python
-async function procesarCodigoEscaneado(codigo11Digitos) {
-    if (!scanningActive) return;
-    scanningActive = false; // Pausamos el escaneo para no saturar
+    // Efecto visual de captura exitosa
+    scannerBox.classList.add('box-success');
+    if (navigator.vibrate) navigator.vibrate(60); // Vibración háptica en celulares
 
     try {
-        // Cambia localhost por la IP local de tu PC cuando pruebes desde el celular
-        const response = await fetch(`http://localhost:8000/scan/${codigo11Digitos}`);
-        
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.detail || "Error en el servidor");
-        }
-
+        const response = await fetch(`${API_BASE_URL}/scan/${codigo}`);
         const data = await response.json();
-        mostrarProducto(data.producto);
 
+        if (response.ok) {
+            mostrarTarjetaProducto(data.producto);
+        } else {
+            alert(`Error: ${data.detail || 'Código inválido'}`);
+            reiniciarEscaner();
+        }
     } catch (error) {
-        console.error("Error al escanear:", error.message);
-        // Feedback visual de error (Parpadeo rojo rápido)
-        scannerLaser.style.borderColor = "#ef4444";
-        setTimeout(() => {
-            scannerLaser.style.borderColor = "rgba(255,255,255,0.6)";
-            scanningActive = true;
-        }, 1500);
+        alert("Error de conexión con el servidor backend.");
+        reiniciarEscaner();
     }
 }
 
-function mostrarProducto(producto) {
-    // Feedback háptico (Vibración corta si estás en celular)
-    if (navigator.vibrate) navigator.vibrate(60);
-
-    // Feedback visual verde
-    scannerLaser.classList.add('scanner-success');
-
-    // Inyectar datos en el Bottom Sheet estilo Apple
-    prodNombre.textContent = producto.nombre;
-    prodPrecio.textContent = `$${producto.precio.toLocaleString('es-AR')}`;
-    prodStock.textContent = `Stock: ${producto.stock} u.`;
-
-    // Desplegar tarjeta animada
+// 3. Renderizar y mostrar el Bottom Sheet de Apple
+function mostrarTarjetaProducto(producto) {
+    document.getElementById('prod-nombre').innerText = producto.nombre;
+    document.getElementById('prod-precio').innerText = `$${producto.precio.toLocaleString('es-AR')}`;
+    document.getElementById('prod-stock').innerText = `Stock: ${producto.stock} u.`;
+    document.getElementById('prod-id').innerText = `ID: ${producto.codigo}`;
+    
     productCard.classList.add('sheet-open');
 }
 
-function cerrarTarjeta() {
+function reiniciarEscaner() {
     productCard.classList.remove('sheet-open');
-    scannerLaser.classList.remove('scanner-success');
-    
-    // Esperamos a que termine la animación de bajada para reactivar la cámara
+    scannerBox.classList.remove('box-success');
     setTimeout(() => {
-        scanningActive = true;
-    }, 400);
+        escaneoBloqueado = false;
+    }, 400); // Pequeño delay de gracia antes del próximo escaneo
 }
 
-// Permitir simular un escaneo haciendo click en el cuadro del visor (Ideal para desarrollo/testeo)
-scannerLaser.addEventListener('click', () => {
-    // Enviamos el código de la Remera Oversize generado por el backend
-    procesarCodigoEscaneado("00000000013"); 
+// Event Listeners para cerrar la tarjeta
+document.getElementById('btn-close').addEventListener('click', reiniciarEscaner);
+document.getElementById('btn-close-bar').addEventListener('click', reiniciarEscaner);
+
+// Botón de prueba para simular lectura real sin usar la lógica visual compleja de la cámara
+document.getElementById('btn-manual').addEventListener('click', () => {
+    procesarCodigoDetectado('00000000013');
 });
 
-// Arrancar la app
-initCamera();
-iniciarBucleEscaneo();
+// Arrancar cámara al cargar la página
+window.addEventListener('load', inicializarCamara);
